@@ -48,6 +48,11 @@ namespace QuantConnectStubsGenerator
 
         public void Run()
         {
+            if (File.Exists("summaries.txt"))
+            {
+                File.Delete("summaries.txt");
+            }
+
             // Create an empty ParseContext which will be filled with all relevant information during parsing
             var context = new ParseContext();
 
@@ -479,6 +484,57 @@ namespace QuantConnectStubsGenerator
             }
         }
 
+        private void CheckSummary(string summary, Class cls, CodeEntity entity)
+        {
+            if (summary == null || entity.Documentation == null ||
+                !cls.Type.Namespace.StartsWith("QuantConnect") ||
+                cls.Type.Namespace.StartsWith("QuantConnect.Lean.Engine") ||
+                cls.Type.Name.StartsWith("Messages") ||
+                cls.Type.Namespace.StartsWith("QuantConnect.Brokerages") ||
+                cls.Type.Namespace.StartsWith("QuantConnect.Packets") ||
+                cls.Type.Namespace.Contains("Python") || cls.Type.Name.Contains("Python") ||
+                (entity is Method mm && mm.Name.Contains("Python")) ||
+                (entity is Property pp && pp.Name.Contains("Python")))
+                return;
+
+            var docs = entity.Documentation.OuterXml.ReplaceLineEndings("");
+            var matches = Regex.Matches(docs, @"([ ""])(([A-Z]([a-z]*))(([A-Z]([a-z]*))|\d+)+)(\.([A-Z]([a-z]*))(([A-Z]([a-z]*))|\d+)*)?([ ""])");
+
+            if (matches.Count > 0)
+            {
+                if (matches.Any(match =>
+                {
+                    var matchStr = match.Groups[0].Value;
+                    var pattern1 = @$"<see(also)? cref=""{matchStr}""[ ]?/>";
+                    var pattern2 = @$"<paramref name=""{matchStr}""[ ]?/>";
+
+                    return //matchStr != matchStr.ToUpperInvariant() &&
+                        (!Regex.Match(docs, pattern1).Success && !Regex.Match(docs, pattern2).Success);
+                }))
+                {
+                    if (entity is Class)
+                    {
+                        File.AppendAllText("summaries.txt", $"{cls.Type.Namespace}.{cls.Type.Name}\n");
+                    }
+                    else if (entity is Property property)
+                    {
+                        File.AppendAllText("summaries.txt", $"{cls.Type.Namespace}.{cls.Type.Name}.{property.Name}\n");
+                    }
+                    else if (entity is Method method)
+                    {
+                        if (method.Name == "__init__")
+                        {
+                            File.AppendAllText("summaries.txt", $"{cls.Type.Namespace}.{cls.Type.Name}.{cls.Type.Name}\n");
+                        }
+                        else
+                        {
+                            File.AppendAllText("summaries.txt", $"{cls.Type.Namespace}.{cls.Type.Name}.{method.Name}\n");
+                        }
+                    }
+                }
+            }
+        }
+
         private string CleanUpSummary(string summary)
         {
             return summary != null ? _summaryCleanupRegex.Replace(summary, "<$1>") : null;
@@ -497,6 +553,8 @@ namespace QuantConnectStubsGenerator
                 {
                     continue;
                 }
+
+                CheckSummary(entity.Documentation.OuterXml, cls, entity);
 
                 var summaryNode = entity.Documentation["root"]["summary"];
                 if (summaryNode != null)
